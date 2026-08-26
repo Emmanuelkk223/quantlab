@@ -67,8 +67,8 @@ conda activate quantlab
 
 3. Install dependencies:
 ```bash
-pip install torch torchvision --index-url [https://download.pytorch.org/whl/cu118](https://download.pytorch.org/whl/cu118)
-pip install transformers datasets accelerate bitsandbytes optuna matplotlib seaborn pandas tqdm
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+pip install -r requirements.txt
 
 ```
 
