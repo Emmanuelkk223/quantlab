@@ -1,0 +1,35 @@
+# Core ML Framework & CUDA Support
+torch>=2.1.0
+torchvision
+torchaudio
+
+# Hugging Face Ecosystem
+transformers>=4.38.0
+datasets>=2.18.0
+evaluate>=0.4.1
+accelerate>=0.27.0
+
+# Quantization & Hardware Acceleration Backends
+bitsandbytes>=0.42.0
+onnx>=1.15.0
+onnxruntime-gpu>=1.17.0
+
+# Hardware Profiling & System Metrics
+pynvml>=11.5.0
+psutil>=5.9.0
+
+# Numerical, Optimization & Analysis Tools
+numpy>=1.24.0
+scipy>=1.11.0
+pandas>=2.1.0
+optuna>=3.5.0
+
+# Visualization & Scientific Reporting
+matplotlib>=3.8.0
+seaborn>=0.13.0
+rich>=13.7.0
+
+# Developer Tools & Testing
+pytest>=8.0.0
+pyyaml>=6.0.1
+tqdm>=4.66.0
