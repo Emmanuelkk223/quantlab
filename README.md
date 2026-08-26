@@ -126,7 +126,7 @@ python quantlab/experiments/pareto_search.py
 
 
 
----
+<!-- ---
 
 ## 📜 Citation
 
@@ -140,7 +140,7 @@ If you use this framework or build upon its findings in your research, please ci
   year={2026}
 }
 
-```
+``` -->
 
 ---
 
@@ -152,7 +152,7 @@ If you use this framework or build upon its findings in your research, please ci
 
 *Garden City University College, Kumasi, Ghana*
 
-📧 Email: aemmanuelkakari@gmail.com / ameyaw.kakari@gcuc.edu.gh
+📧 Email: aemmanuelkakari@gmail.com
 
 ---
 
