@@ -51,7 +51,7 @@ quantlab/
 
 1. Clone the repository:
 ```bash
-git clone [https://github.com/Emmanuelkk223/quantlab.git](https://github.com/Emmanuelkk223/quantlab.git)
+git clone https://github.com/Emmanuelkk223/quantlab.git
 cd quantlab
 
 ```
