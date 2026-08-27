@@ -26,6 +26,10 @@ def verify_and_get_precision_manifest(model, skip_modules: list):
         if not isinstance(module, (torch.nn.Linear, bnb.nn.Linear4bit)):
             continue
 
+        # Exclude classification head/pre-classifier layers to match the 36 transformer target dimensions
+        if "classifier" in name:
+            continue
+
         if isinstance(module, bnb.nn.Linear4bit):
             nf4_count += 1
             manifest[name] = "NF4"
