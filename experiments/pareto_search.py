@@ -1,6 +1,6 @@
 """
 quantlab/experiments/pareto_search.py
-Definitive Publication Version: 100-Trial NSGA-II Search (Seed: 42, 36 Dimensions, P50 Latency)
+Definitive Publication Version: 100-Trial NSGA-II Search (Seed: 42, 36 Unique Variables, P50 Latency)
 """
 
 import os
@@ -25,13 +25,12 @@ def verify_and_get_precision_manifest(model, skip_modules: list):
     for name, module in model.named_modules():
         if not isinstance(module, (torch.nn.Linear, bnb.nn.Linear4bit)):
             continue
-        short_name = name.split(".")[-1]
 
         if isinstance(module, bnb.nn.Linear4bit):
             nf4_count += 1
             manifest[name] = "NF4"
             assert (
-                short_name not in skip_modules
+                name not in skip_modules
             ), f"Invariant Failure: {name} is 4-bit but listed as FP16!"
             assert (
                 module.weight.dtype == torch.uint8
@@ -40,7 +39,7 @@ def verify_and_get_precision_manifest(model, skip_modules: list):
             fp16_count += 1
             manifest[name] = "FP16"
             assert (
-                short_name in skip_modules
+                name in skip_modules
             ), f"Invariant Failure: {name} is FP16 but not in skip_modules!"
             assert module.weight.dtype in [
                 torch.float16,
@@ -57,7 +56,7 @@ class NSGAIIObjective:
         self.model_name = model_name
         self.device = torch.device(device)
 
-        # 1024-sample deterministic Search Set
+        # Explicit 1024-sample deterministic Search Set
         dataloader_builder = GLUEDataLoader(
             model_name_or_path=model_name, batch_size=16
         )
@@ -66,8 +65,9 @@ class NSGAIIObjective:
         )
 
         temp_model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        # Extract full unambiguous layer names to guarantee 36 unique variables
         self.target_layers = [
-            name.split(".")[-1]
+            name
             for name, module in temp_model.named_modules()
             if isinstance(module, torch.nn.Linear) and "classifier" not in name
         ]
@@ -83,16 +83,20 @@ class NSGAIIObjective:
         skip_modules = []
         precision_vector = []
 
+        # Create 36 strictly unique Optuna variables (resolving name collisions)
         for layer_name in self.target_layers:
-            keep_fp16 = trial.suggest_categorical(
-                f"keep_fp16_{layer_name}", [True, False]
-            )
+            # Safe unique variable name (e.g., keep_fp16_distilbert_transformer_layer_0_attention_q_lin)
+            safe_var_name = f"keep_fp16_{layer_name.replace('.', '_')}"
+            keep_fp16 = trial.suggest_categorical(safe_var_name, [True, False])
             if keep_fp16:
                 skip_modules.append(layer_name)
                 precision_vector.append("FP16")
             else:
                 precision_vector.append("NF4")
 
+        assert (
+            len(skip_modules) + precision_vector.count("NF4") == 36
+        ), "Dimension mismatch in precision vector"
         trial.set_user_attr("precision_vector", str(precision_vector))
         trial.set_user_attr("fp16_layer_count", len(skip_modules))
 
@@ -112,7 +116,7 @@ class NSGAIIObjective:
             )
             model.eval()
 
-            # Programmatic verification of all 36 decisions
+            # Programmatic verification of all 36 distinct states
             verify_and_get_precision_manifest(model, skip_modules)
 
             dummy_batch = next(iter(self.search_loader))
@@ -122,7 +126,7 @@ class NSGAIIObjective:
                 if k in ["input_ids", "attention_mask"]
             }
 
-            # 30 Warmup Iterations (Matching Paper Protocol)
+            # 30 Warm-up iterations (Matching paper protocol)
             with torch.no_grad():
                 for _ in range(30):
                     _ = model(**dummy_inputs)
@@ -132,7 +136,7 @@ class NSGAIIObjective:
             total = 0
             latencies = []
 
-            # 100 Active Timing Iterations (Matching Paper Protocol)
+            # 100 Active timing samples (Matching paper protocol)
             with torch.no_grad():
                 for batch in self.search_loader:
                     inputs = {
@@ -168,10 +172,10 @@ class NSGAIIObjective:
 
 
 if __name__ == "__main__":
-    print("[+] Initializing Definitive 100-Trial NSGA-II Search (36 Dimensions)...")
+    print("[+] Initializing Definitive 36-Dimensional 100-Trial NSGA-II Search...")
     sampler = optuna.samplers.NSGAIISampler(seed=SEED)
     study = optuna.create_study(
-        study_name="quantlab_nsgaii_100_final",
+        study_name="quantlab_nsgaii_36dim_100",
         directions=["maximize", "minimize"],
         sampler=sampler,
     )
@@ -194,7 +198,7 @@ if __name__ == "__main__":
         )
 
     os.makedirs("results", exist_ok=True)
-    pd.DataFrame(results).to_csv("results/nsgaii_pareto_front.csv", index=False)
+    pd.DataFrame(results).to_csv("results/nsgaii_pareto_front_36dim.csv", index=False)
     print(
-        "[+] Search complete. Non-dominated configurations saved to results/nsgaii_pareto_front.csv"
+        "[+] Search complete. True 36-dimensional non-dominated configurations saved to results/nsgaii_pareto_front_36dim.csv"
     )

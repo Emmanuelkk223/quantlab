@@ -23,6 +23,7 @@ class NF4SensitivityProfiler:
         )
         self.model.eval()
 
+        # Deterministic 256-sample calibration split from SST-2 training data
         dataloader_builder = GLUEDataLoader(
             model_name_or_path=model_name, batch_size=16
         )
@@ -92,7 +93,6 @@ class NF4SensitivityProfiler:
             if isinstance(module, nn.Linear) and "classifier" not in name
         ]
 
-        # Enforce exact 36-layer DistilBERT invariant
         assert (
             len(target_layers) == 36
         ), f"Expected exactly 36 projection layers, found {len(target_layers)}"
