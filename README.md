@@ -225,9 +225,9 @@ If you use QuantLab or build on the results reported in the associated manuscrip
 ```bibtex
 @article{kakari2026quantlab,
   title  = {QuantLab: Hardware-Aware Mixed-Precision Quantization and Pareto Optimization for Transformer Encoder Inference},
-  author = {Kakari, Ameyaw Emmanuel},
+  author = {Ameyaw, Emmanuel Kakari},
   year   = {2026},
-  note   = {Department of Computer Science \& IT, Garden City University College}
+  note   = {Department of Computer Science \& IT, Garden City University}
 }
 ```
 
