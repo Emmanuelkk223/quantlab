@@ -1,9 +1,6 @@
 """
 quantlab/experiments/sensitivity_analysis.py
-
-Publication Version:
-Performs isolated single-layer perturbation analysis using simulated NF4 quantization.
-Uses a deterministic 256-sample calibration split from the SST-2 training data (Seed: 42).
+Definitive Publication Version: 36-Layer NF4 Perturbation Sweep (Seed: 42)
 """
 
 import torch
@@ -26,7 +23,6 @@ class NF4SensitivityProfiler:
         )
         self.model.eval()
 
-        print(f"[+] Initializing NF4 Sensitivity Profiler (Seed: {SEED})")
         dataloader_builder = GLUEDataLoader(
             model_name_or_path=model_name, batch_size=16
         )
@@ -90,13 +86,13 @@ class NF4SensitivityProfiler:
         baseline_logits = self.compute_baseline_logits()
         sensitivity_scores = {}
 
-        # Filter to exact 36 linear projections for DistilBERT
         target_layers = [
             name
             for name, module in self.model.named_modules()
             if isinstance(module, nn.Linear) and "classifier" not in name
         ]
 
+        # Enforce exact 36-layer DistilBERT invariant
         assert (
             len(target_layers) == 36
         ), f"Expected exactly 36 projection layers, found {len(target_layers)}"
@@ -118,7 +114,6 @@ class NF4SensitivityProfiler:
 
             module.weight.data = original_weight
             sensitivity_scores[name] = mse_sum / total_elements
-            print(f"    Layer: {name:<45} | LMSE: {sensitivity_scores[name]:.6f}")
 
         return sensitivity_scores
 
@@ -140,12 +135,5 @@ if __name__ == "__main__":
     sum_mhsa = sum(mhsa_scores.values())
     sum_total = sum(scores.values())
 
-    print("\n" + "=" * 70)
-    print("      AGGREGATE SINGLE-LAYER LMSE SHARE UNDER NF4 PERTURBATION      ")
-    print("=" * 70)
-    print(f"Formula: S_FFN = Sum(LMSE_ffn) / Sum(LMSE_all)")
-    print(f"Total Evaluated Projection Layers: 36")
-    if sum_total > 0:
-        print(f"FFN Share (S_FFN):   {(sum_ffn / sum_total) * 100:.2f}%")
-        print(f"MHSA Share (S_MHSA): {(sum_mhsa / sum_total) * 100:.2f}%")
-    print("=" * 70)
+    print(f"FFN Single-Layer LMSE Share (S_FFN): {(sum_ffn / sum_total) * 100:.2f}%")
+    print(f"MHSA Single-Layer LMSE Share (S_MHSA): {(sum_mhsa / sum_total) * 100:.2f}%")
