@@ -1,32 +1,37 @@
 """
 quantlab/experiments/sensitivity_analysis.py
 
-Performs isolated single-layer perturbation analysis using simulated NF4 quantization
-and real SST-2 calibration data to calculate structural logit MSE.
+Publication Version:
+Performs isolated single-layer perturbation analysis using simulated NF4 quantization.
+Uses a deterministic 256-sample calibration split from the SST-2 training data (Seed: 42).
 """
 
 import torch
 import torch.nn as nn
+import numpy as np
 from typing import Dict
 from quantlab.datasets.glue_loader import GLUEDataLoader
-from quantlab.models.base_model import BaseModelWrapper
+from transformers import AutoModelForSequenceClassification
+
+SEED = 42
+torch.manual_seed(SEED)
+np.random.seed(SEED)
 
 
 class NF4SensitivityProfiler:
     def __init__(self, model_name: str, device: str = "cuda:0", num_samples: int = 256):
         self.device = torch.device(device)
-        self.wrapper = BaseModelWrapper(
-            model_name, dtype=torch.float32, device=self.device
+        self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(
+            self.device
         )
-        self.model = self.wrapper.model
         self.model.eval()
 
-        # Use isolated calibration split
+        print(f"[+] Initializing NF4 Sensitivity Profiler (Seed: {SEED})")
         dataloader_builder = GLUEDataLoader(
-            model_name_or_path=model_name, batch_size=32
+            model_name_or_path=model_name, batch_size=16
         )
         calib_loader, _, _ = dataloader_builder.get_splits(
-            num_calibration=num_samples, num_search=512
+            num_calibration=num_samples, num_search=1024
         )
 
         self.calibration_batches = []
@@ -42,7 +47,6 @@ class NF4SensitivityProfiler:
             if samples_collected >= num_samples:
                 break
 
-        # Pre-compute exact NF4 quantiles (standardized)
         self.nf4_quantiles = torch.tensor(
             [
                 -1.0,
@@ -72,8 +76,7 @@ class NF4SensitivityProfiler:
         normalized_weight = weight / absmax
         distances = torch.abs(normalized_weight.unsqueeze(-1) - self.nf4_quantiles)
         nearest_indices = torch.argmin(distances, dim=-1)
-        quantized_normalized = self.nf4_quantiles[nearest_indices]
-        return quantized_normalized * absmax
+        return self.nf4_quantiles[nearest_indices] * absmax
 
     def compute_baseline_logits(self) -> list:
         baseline_logits = []
@@ -84,33 +87,38 @@ class NF4SensitivityProfiler:
         return baseline_logits
 
     def run_sweep(self) -> Dict[str, float]:
-        print("[+] Computing baseline logits on calibration set...")
         baseline_logits = self.compute_baseline_logits()
-
         sensitivity_scores = {}
-        print("[+] Running layer-wise NF4 perturbation sweep...")
 
-        for name, module in self.model.named_modules():
-            if isinstance(module, nn.Linear) and "classifier" not in name:
-                original_weight = module.weight.data.clone()
-                module.weight.data = self._quantize_dequantize_nf4(original_weight)
+        # Filter to exact 36 linear projections for DistilBERT
+        target_layers = [
+            name
+            for name, module in self.model.named_modules()
+            if isinstance(module, nn.Linear) and "classifier" not in name
+        ]
 
-                mse_sum = 0.0
-                total_elements = 0
-                with torch.no_grad():
-                    for batch_idx, batch in enumerate(self.calibration_batches):
-                        perturbed_logits = self.model(**batch).logits
-                        mse_sum += torch.nn.functional.mse_loss(
-                            perturbed_logits,
-                            baseline_logits[batch_idx],
-                            reduction="sum",
-                        ).item()
-                        total_elements += perturbed_logits.numel()
+        assert (
+            len(target_layers) == 36
+        ), f"Expected exactly 36 projection layers, found {len(target_layers)}"
 
-                module.weight.data = original_weight
-                layer_mse = mse_sum / total_elements
-                sensitivity_scores[name] = layer_mse
-                print(f"    Layer: {name:<45} | Logit MSE: {layer_mse:.6f}")
+        for name in target_layers:
+            module = dict(self.model.named_modules())[name]
+            original_weight = module.weight.data.clone()
+            module.weight.data = self._quantize_dequantize_nf4(original_weight)
+
+            mse_sum = 0.0
+            total_elements = 0
+            with torch.no_grad():
+                for batch_idx, batch in enumerate(self.calibration_batches):
+                    perturbed_logits = self.model(**batch).logits
+                    mse_sum += torch.nn.functional.mse_loss(
+                        perturbed_logits, baseline_logits[batch_idx], reduction="sum"
+                    ).item()
+                    total_elements += perturbed_logits.numel()
+
+            module.weight.data = original_weight
+            sensitivity_scores[name] = mse_sum / total_elements
+            print(f"    Layer: {name:<45} | LMSE: {sensitivity_scores[name]:.6f}")
 
         return sensitivity_scores
 
@@ -121,19 +129,23 @@ if __name__ == "__main__":
     )
     scores = profiler.run_sweep()
 
-    # Calculate FFN vs MHSA distortion proportion
-    ffn_total = sum(v for k, v in scores.items() if "ffn" in k)
-    mhsa_total = sum(
-        v
+    ffn_scores = {k: v for k, v in scores.items() if "ffn" in k}
+    mhsa_scores = {
+        k: v
         for k, v in scores.items()
-        if any(k_sub in k for k_sub in ["q_lin", "k_lin", "v_lin", "out_lin"])
-    )
-    grand_total = ffn_total + mhsa_total
+        if any(sub in k for sub in ["q_lin", "k_lin", "v_lin", "out_lin"])
+    }
 
-    print("\n" + "=" * 50)
-    print("       AGGREGATE SENSITIVITY RESULTS SUMMARY       ")
-    print("=" * 50)
-    if grand_total > 0:
-        print(f"FFN Distortion Share:  {(ffn_total / grand_total) * 100:.2f}%")
-        print(f"MHSA Distortion Share: {(mhsa_total / grand_total) * 100:.2f}%")
-    print("=" * 50)
+    sum_ffn = sum(ffn_scores.values())
+    sum_mhsa = sum(mhsa_scores.values())
+    sum_total = sum(scores.values())
+
+    print("\n" + "=" * 70)
+    print("      AGGREGATE SINGLE-LAYER LMSE SHARE UNDER NF4 PERTURBATION      ")
+    print("=" * 70)
+    print(f"Formula: S_FFN = Sum(LMSE_ffn) / Sum(LMSE_all)")
+    print(f"Total Evaluated Projection Layers: 36")
+    if sum_total > 0:
+        print(f"FFN Share (S_FFN):   {(sum_ffn / sum_total) * 100:.2f}%")
+        print(f"MHSA Share (S_MHSA): {(sum_mhsa / sum_total) * 100:.2f}%")
+    print("=" * 70)
