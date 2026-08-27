@@ -1,151 +1,244 @@
 # QuantLab
+
 ### Hardware-Aware Mixed-Precision Quantization and Pareto Optimization for Transformer Encoder Inference
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/License:MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**QuantLab** is an open-source, research-grade framework designed to systematically profile, evaluate, and optimize layer-wise numerical precisions for Transformer encoder models under real hardware constraints. 
+QuantLab is an open-source research framework for studying **hardware-aware mixed-precision quantization** of Transformer encoder models. It combines layer-isolated sensitivity analysis, low-bit NF4 weight quantization, CUDA-based latency measurement, and multi-objective NSGA-II search to investigate accuracy–latency trade-offs on physical GPU hardware.
 
-Traditional Post-Training Quantization (PTQ) enforces uniform bit-widths across all layers, leading to task accuracy degradation or poor wall-clock speedups due to silicon execution bottlenecks. QuantLab bridges the gap between theoretical quantization mathematics and physical GPU execution by combining high-resolution CUDA stream event timing ($L_{\text{P50}}$), simulated 4-bit NormalFloat (NF4) logit perturbation sensitivity analysis, and unconstrained Multi-Objective NSGA-II Pareto optimization over a true 36-dimensional layer precision space.
+The experimental study reported with this repository evaluates **DistilBERT on SST-2 using an NVIDIA GeForce RTX 4060 Laptop GPU**.
 
----
+## Research Overview
 
-## 📂 Repository Structure
+QuantLab is motivated by two practical observations:
+
+1. Transformer components can have substantially different sensitivity to quantization error.
+2. Lower numerical precision does not necessarily produce a proportional reduction in measured wall-clock latency on physical hardware.
+
+QuantLab therefore combines **layer-level perturbation analysis** with **direct hardware measurement** and a **multi-objective precision-allocation search**.
+
+## Key Components
+
+### Layer-isolated NF4 sensitivity analysis
+
+QuantLab perturbs one target projection layer at a time using simulated NF4 quantization/dequantization and measures the resulting logit mean squared error (LMSE) on a deterministic calibration subset.
+
+Final aggregate sensitivity result:
+
+- **FFN single-layer LMSE share:** 99.34%
+- **MHSA single-layer LMSE share:** 0.66%
+
+The evaluated DistilBERT model also shows particularly high sensitivity in the FFN output projections (`ffn.lin2`).
+
+### 36-dimensional mixed-precision search
+
+The search assigns each of the 36 target projection layers an independent precision choice:
+
+- `NF4`
+- `FP16`
+
+The resulting binary search space contains:
+
+\[
+2^{36}=68,719,476,736
+\]
+
+possible precision assignments. The study evaluates 100 NSGA-II trials, so the reported configurations are **observed non-dominated solutions**, not an exhaustive global Pareto frontier.
+
+### Hardware profiling
+
+Latency is measured with CUDA events using fixed input shapes:
+
+- Batch size: `16`
+- Sequence length: `128`
+- Warm-up iterations: `30`
+- Active timing samples: `100`
+- Optimization latency statistic: median (`P50`)
+
+The resulting latency values are specific to the evaluated GPU and software stack.
+
+## Repository Structure
 
 ```text
 quantlab/
-├── calibration/          # Calibration routines and data partitioning
-├── configs/              # YAML configuration files for experiments
-├── datasets/             # Isolated GLUE benchmark data loaders (SST-2 four-tier splits)
-├── evaluation/           # Task metrics, loss calculations, and evaluation utilities
-├── experiments/          # 36-dimensional sensitivity analysis & NSGA-II search drivers
-├── hardware/             # High-resolution CUDA event latency and memory profilers
-├── models/               # BaseModelWrapper & transformer layer introspection parser
-├── quantization/         # Uniform/mixed precision engines and precision mappers
-├── quantlab/             # Core package visual assets and artifact outputs
-├── results/              # CSV search logs, Pareto data exports, and manifests
-├── scripts/              # Executable benchmarks, accuracy evaluation, and reporting scripts
-├── tests/                # Unit tests for hardware profilers and quantization invariants
-├── visualization/        # Pareto frontier, latency, and heatmap plotting tools
+├── calibration/          # Calibration utilities
+├── configs/              # Experiment configuration files
+├── datasets/             # Dataset loaders and split utilities
+├── evaluation/           # Evaluation metrics and helpers
+├── experiments/          # Sensitivity analysis and NSGA-II search
+├── hardware/             # CUDA latency and GPU memory profiling
+├── models/               # Model wrappers and layer introspection
+├── quantization/         # Quantization engines and precision mapping
+├── quantlab/             # Generated package/result assets
+├── results/              # Search results and exported artifacts
+├── scripts/              # Benchmarking and evaluation scripts
+├── tests/                # Unit tests
+├── visualization/        # Plotting utilities
 ├── pyproject.toml        # Project metadata and build configuration
-├── requirements.txt      # Python dependencies specification
+├── requirements.txt      # Python dependencies
 └── README.md             # Project documentation
-
 ```
 
----
+## Installation
 
-## 🛠️ Key Framework Features
+### 1. Clone the repository
 
-1. **High-Resolution CUDA Profiling:** Uses non-blocking CUDA stream hardware events (`torch.cuda.Event`) with explicit warm-up iterations ($N_{\text{warmup}} = 30$) and 100 active samples to record stable median wall-clock latency ($L_{\text{P50}}$), avoiding thermal throttling and cold-start bias.
-2. **True 36-Dimensional Optimization Space:** Uniquely parameterizes all 36 linear projection layers of DistilBERT (6 transformer blocks $\times$ 6 projections) into independent binary optimization variables, resolving module-name collision bugs.
-3. **Simulated NF4 Perturbation Sensitivity:** Quantifies structural layer vulnerability via isolated 4-bit NormalFloat quantization, establishing that FFN projections account for **99.34%** of aggregate single-layer logit $\mathcal{L}_{\text{MSE}}$.
-4. **Strict Four-Tier Data Protocol:** Enforces total isolation between the 256-sample calibration set, 1,024-sample search set, and 872-sample locked holdout validation set (official SST-2 validation split) to prevent data leakage and selection bias.
-
----
-
-## ⚙️ Installation
-
-1. Clone the repository and check out the publication tag:
 ```bash
 git clone https://github.com/Emmanuelkk223/quantlab.git
 cd quantlab
-git checkout v1.0-paper
-
 ```
 
+### 2. Check out the publication version
 
-2. Create and activate a Python virtual environment:
+```bash
+git checkout v1.0-paper
+```
+
+### 3. Create a Python environment
+
+Using Conda:
+
 ```bash
 conda create -n quantlab python=3.10 -y
 conda activate quantlab
-
 ```
 
+Or using Python `venv`:
 
-3. Install dependencies:
 ```bash
+python3.10 -m venv .venv
+source .venv/bin/activate
+```
+
+### 4. Install dependencies
+
+```bash
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-
 ```
 
+## Reproducing the Experiments
 
+Run the following commands from the **repository root**.
 
----
-
-## 🚀 Reproducibility & Usage
-
-### 1. Run Simulated NF4 Sensitivity Analysis
-
-Execute the deterministic 256-sample calibration sweep (Seed: 42) to calculate single-layer logit Mean Squared Error ($\mathcal{L}_{\text{MSE}}$):
+### 1. Run NF4 sensitivity analysis
 
 ```bash
-PYTHONPATH=.. python experiments/sensitivity_analysis.py
-
+PYTHONPATH=. python experiments/sensitivity_analysis.py
 ```
 
-### 2. Execute 36-Dimensional NSGA-II Pareto Search
+Expected aggregate result:
 
-Run the 100-trial evolutionary search over the 36 independent precision choices, enforcing programmatic verification of instantiated layers:
+```text
+FFN Single-Layer LMSE Share (S_FFN): 99.34%
+MHSA Single-Layer LMSE Share (S_MHSA): 0.66%
+```
+
+### 2. Run the 36-dimensional NSGA-II search
 
 ```bash
-PYTHONPATH=.. python experiments/pareto_search.py
-
+PYTHONPATH=. python experiments/pareto_search.py
 ```
 
-### 3. Evaluate on Locked Holdout Validation Set
+The search evaluates 100 trials over 36 independent binary precision decisions and exports the resulting search data and precision manifests under `results/`.
 
-Benchmark the discovered Pareto candidates against uniform precision baselines on the official SST-2 validation split:
+### 3. Evaluate the discovered candidates on the locked holdout validation split
 
 ```bash
-PYTHONPATH=.. python scripts/evaluate_accuracy.py
-
+PYTHONPATH=. python scripts/evaluate_accuracy.py
 ```
 
----
+## Final Reported Results
 
-## 📊 Summary of Final Empirical Results (NVIDIA RTX 4060 Laptop GPU)
+The final generalization evaluation uses the **872-example official SST-2 validation split as a locked holdout validation set**. It is not the hidden-label SST-2 test split.
 
-Evaluated on `distilbert-base-uncased-finetuned-sst-2-english` ($B=16, L=128$):
+| Configuration | Holdout Accuracy | Median Latency | FP16 Layers |
+|---|---:|---:|---:|
+| FP32 Baseline | 91.06% | 28.83 ± 0.51 ms | 38 / 38 |
+| Uniform NF4 | 90.83% | 13.92 ± 0.21 ms | 0 / 38 |
+| Pareto Candidate #1 | 90.83% | 16.11 ± 0.15 ms | 12 / 38 |
+| Pareto Candidate #2 | 90.94% | 17.07 ± 0.18 ms | 18 / 38 |
+| **Pareto Candidate #3** | **91.17%** | **14.79 ± 0.16 ms** | **6 / 38** |
+| Pareto Candidate #4 | 90.48% | 21.55 ± 0.23 ms | 18 / 38 |
 
-| Configuration | Holdout Accuracy ($N=872$) | Median Latency ($L_{\text{P50}}$) | FP16 Layers Allocated |
-| --- | --- | --- | --- |
-| **FP32 Baseline** | 91.06% | 28.90 ms ($\pm0.35$) | 36 / 36 |
-| **Uniform NF4** | 90.83% | 13.70 ms ($\pm0.26$) | 0 / 36 |
-| **Uniform INT8** | 54.24% | 17.04 ms ($\pm0.41$) | 0 / 36 |
-| **Pareto Candidate #3** | **91.17%** | **14.79 ms ($\pm0.13$)} | **6 / 36** |
+### Main observed result
 
-* **Key Takeaway:** **Pareto Candidate #3** achieves task accuracy preservation comparable to the unquantized FP32 baseline while slashing median physical inference latency by **48.8%** (28.90 ms down to 14.79 ms).
+Pareto Candidate #3 maintained accuracy comparable to FP32 while reducing median inference latency from:
 
----
+```text
+28.83 ms  →  14.79 ms
+```
 
-## 📜 Citation
+This corresponds to an approximate **48.7% reduction in median latency**.
 
-If you build upon this framework or reference its empirical findings, please cite the manuscript:
+The 0.11 percentage-point difference between Candidate #3 and FP32 is small and is not presented as a statistically established accuracy improvement.
+
+## Search-Stage Result
+
+The highest observed search-set accuracy was **98.54%**.
+
+This is a search-stage result used during NSGA-II optimization and is **not** the final generalization result. The final locked holdout result for Candidate #3 is **91.17%**.
+
+## Experimental Data Protocol
+
+The study uses three evaluation tiers:
+
+1. **Calibration set:** 256 examples from the SST-2 training split, sampled deterministically with seed 42 for sensitivity analysis.
+2. **Search set:** 1,024 examples used during NSGA-II optimization.
+3. **Locked holdout validation set:** the official 872-example SST-2 validation split, reserved for post-search evaluation.
+
+The hidden-label SST-2 test split is not used for the reported generalization results.
+
+## Reproducibility
+
+For reproducibility, record and preserve the exact:
+
+- Python version
+- PyTorch version
+- CUDA version
+- NVIDIA driver version
+- Transformers version
+- BitsAndBytes version
+- Optuna version
+- random seeds
+- experiment configuration
+- repository commit/tag
+- precision manifests
+- raw experiment logs
+
+The publication version is identified by the `v1.0-paper` tag.
+
+## Testing
+
+Run the repository tests with:
+
+```bash
+python -m pytest -q
+```
+
+## Citation
+
+If you use QuantLab or build on the results reported in the associated manuscript, please cite the paper:
 
 ```bibtex
 @article{kakari2026quantlab,
-  title={QuantLab: Hardware-Aware Mixed-Precision Quantization and Pareto Optimization for Transformer Encoder Inference},
-  author={Kakari, Ameyaw Emmanuel},
-  journal={Department of Computer Science \& IT, Garden City University College},
-  year={2026}
+  title  = {QuantLab: Hardware-Aware Mixed-Precision Quantization and Pareto Optimization for Transformer Encoder Inference},
+  author = {Kakari, Ameyaw Emmanuel},
+  year   = {2026},
+  note   = {Department of Computer Science \& IT, Garden City University College}
 }
-
 ```
 
----
+## License
 
-## 👤 Author
+This project is released under the MIT License. See `LICENSE`.
 
-**Ameyaw Emmanuel Kakari**
+## Author
 
-*Department of Computer Science & IT*
-
-*Garden City University College, Kumasi, Ghana*
-
-📧 Email: aemmanuelkakari@gmail.com
-
----
-
-*Licensed under the [MIT License](https://www.google.com/search?q=LICENSE).*
+**Ameyaw Emmanuel Kakari**  
+Department of Computer Science & IT  
+Garden City University College  
+Kumasi, Ghana  
+Email: `aemmanuelkakari@gmail.com`
